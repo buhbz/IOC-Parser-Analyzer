@@ -6,7 +6,7 @@ import requests
 import json
 from pathlib import Path
 
-apiKEY = "YOUR_VIRUSTOTAL_API_KEY_HERE"
+apiKEY = "YOUR_API_KEY_HERE"
 vtURL = "https://www.virustotal.com/api/v3/files/{}"
 
 parser = argparse.ArgumentParser(description='IOC parsing & analysis. One argument must be passed, parse file, or analysis file.')
@@ -139,6 +139,12 @@ iocConfigs = {
     }
 }
 
+def addHeader(file):
+    for iocName, iocConfig in iocConfigs.items():
+        with open(iocConfig['storage'], 'a') as f:
+            f.write(f'\n-----{file.name}-----')
+    
+
 if not args.parse and not args.analysis:
     print("Must be run with either --parse or --analysis. EX: py iocParseAnalysis.py -p || py iocParseAnalysis.py -a ioc.txt")
     sys.exit(1)
@@ -157,9 +163,7 @@ if args.parse:
     for file in files:
         try:
             pdf = PdfReader(file)
-            for iocName, iocConfig in iocConfigs.items():
-                with open(iocConfig['storage'], 'a') as f:
-                    f.write(f'\n-----{file.name}-----')
+            addHeader(file)
         except:
             print(f"Error parsing {file}, possible corruption. Skipping file.")
             skippedFiles.append(file)
@@ -179,14 +183,19 @@ if args.parse:
     print(f"PARSED {len(files)} PDF files.")
 
 if args.analysis:
-    with open ('iocLog.txt','r') as log:
+    anaFile = args.analysis
+    with open (anaFile,'r') as log:
         file = log.read()
+        prevParsedVulns = []
         skippedVulns = []
-        scannedVulns = 0
+        scannedVulns = []
         stopVT = False
 
         for iocName, iocConfig in iocConfigs.items():
             matches = iocConfig['pattern'].findall(file)
+            with open (iocConfig['storage'], 'r') as parsd:
+                prev = iocConfig['pattern'].findall(parsd.read())
+                prevParsedVulns.extend(prev)
 
             for vuln in matches:
 
@@ -202,8 +211,10 @@ if args.analysis:
                 if vtResult is None:
                     continue
 
-                scannedVulns+=1
+                scannedVulns.append(vuln)
                 print(f"\n****Potential IOC: {vuln}****")
+                if vuln in prevParsedVulns:
+                    print(f'\nThis IOC was previously parsed by this program. It is worth paying special attention to it.\n')
                 report = json.dumps(vtResult)
                 print(jsonSummary(report))
 
@@ -212,11 +223,20 @@ if args.analysis:
                     print("suspicious Keywords: ")
                     for kw in KW[:10]:
                         print(f"- {kw}")
+        for iocName, iocConfig in iocConfigs.items():
+            with open(iocConfig['storage'], 'a') as file:
+                matches = [item for item in scannedVulns if re.search(iocConfig['pattern'],item)] 
+                if len(matches) != 0:
+                    addHeader(file)
+                    for match in matches:
+                        file.write('\n'+match)
+                    
 
-    print(f"\n----Found {len(skippedVulns)+scannedVulns} IOC's. These could not be scanned:----\n")
+
+    print(f"\n----Found {len(skippedVulns)+len(scannedVulns)} IOC's. These could not be scanned:----\n")
     for vuln in skippedVulns:
         print(vuln)
-    print(f"----Found {len(skippedVulns)+scannedVulns} IOC's. These could not be scanned----")
+    print(f"----Found {len(skippedVulns)+len(scannedVulns)} IOC's. These could not be scanned----")
 
 
 
